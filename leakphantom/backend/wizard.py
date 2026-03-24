@@ -23,10 +23,47 @@ class SetupWizard:
         self.thread_key: Optional[str] = None
         self.legal_accepted = False
 
+    def _is_cloud_environment(self) -> bool:
+        """Detect if running on a cloud server (no hardware possible)."""
+        cloud_vars = [
+            "RENDER", "RENDER_SERVICE_ID",    # Render.com
+            "RAILWAY_ENVIRONMENT",             # Railway
+            "FLY_APP_NAME",                    # Fly.io
+            "HEROKU_APP_NAME", "DYNO",         # Heroku
+            "K_SERVICE",                        # Cloud Run
+            "AWS_LAMBDA_FUNCTION_NAME",         # Lambda
+            "WEBSITE_INSTANCE_ID",              # Azure App Service
+        ]
+        if any(os.getenv(v) for v in cloud_vars):
+            return True
+        # Heuristic: no serial devices AND no wireless tools = likely cloud
+        has_serial = bool(glob.glob("/dev/ttyUSB*") or glob.glob("/dev/ttyACM*")
+                         or glob.glob("/dev/tty.usb*") or glob.glob("/dev/cu.usb*"))
+        has_wireless = shutil.which("iwconfig") or shutil.which("hciconfig")
+        if not has_serial and not has_wireless and platform.system() == "Linux":
+            return True
+        return False
+
     async def detect_hardware(self) -> dict:
         """Auto-detect all available capture hardware."""
         logger.info("[WIZARD] Starting hardware detection ...")
+
+        # Fast path for cloud deployments
+        if self._is_cloud_environment():
+            logger.info("[WIZARD] Cloud environment detected — skipping hardware scan")
+            self.detected_hardware = {
+                "cloud": True,
+                "wifi": {"available": False, "adapters": [], "monitor_capable": []},
+                "bluetooth": {"available": False, "adapters": []},
+                "serial": {"available": False, "ports": []},
+                "tools": self._detect_tools(),
+                "platform": platform.system(),
+                "demo_available": True,
+            }
+            return self.detected_hardware
+
         results = {
+            "cloud": False,
             "wifi": await self._detect_wifi(),
             "bluetooth": await self._detect_bluetooth(),
             "serial": await self._detect_serial(),
@@ -183,7 +220,7 @@ class SetupWizard:
             if extracted:
                 self.thread_key = extracted
                 return {"status": "ok", "key": extracted[:8] + "..." , "source": "otbr"}
-            return {"status": "error", "message": "Could not auto-extract from OTBR"}
+            return {"status": "error", "message": "Could not auto-extract. Requires a locally-connected OpenThread Border Router (OTBR) running on this machine."}
 
         # Validate hex key (Thread keys are 16 bytes = 32 hex chars)
         clean = key.replace(":", "").replace(" ", "").strip()

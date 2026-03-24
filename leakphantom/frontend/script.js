@@ -90,7 +90,6 @@ function handleMessage(msg) {
   if (msg.type === "init") {
     state.demoMode = msg.demo_mode;
     updateModeBadge();
-    // Show wizard on first run
     showWizard();
   } else if (msg.type === "frame") {
     const prevLeaks = state.stats.total_leaks || 0;
@@ -101,7 +100,6 @@ function handleMessage(msg) {
     state.stats = msg.stats || {};
     state.tick = msg.tick || 0;
 
-    // Trigger sounds for new events
     const newLeaks = (state.stats.total_leaks || 0) - prevLeaks;
     if (newLeaks > 0) {
       for (let i = 0; i < Math.min(newLeaks, 3); i++) {
@@ -121,8 +119,8 @@ function handleMessage(msg) {
 // ═══════════════════════════════════════════════════════════════
 // GRAPH RENDERER
 // ═══════════════════════════════════════════════════════════════
-const CELL_W = 9;    // Monospace cell width
-const CELL_H = 18;   // Monospace cell height
+const CELL_W = 9;
+const CELL_H = 18;
 
 function renderGraph() {
   const now = performance.now();
@@ -161,7 +159,6 @@ function renderGraph() {
       ctx.shadowBlur = 15;
     }
 
-    // Bresenham-style dashed line for animated edges
     if (edge.animated && !edge.flash) {
       ctx.setLineDash([4, 6]);
       ctx.lineDashOffset = -(state.tick * 0.5);
@@ -186,11 +183,10 @@ function renderGraph() {
     const ch = PARTICLE_CHARS[Math.floor(p.p * PARTICLE_CHARS.length) % PARTICLE_CHARS.length];
 
     ctx.fillStyle = p.color;
-    ctx.globalAlpha = 1 - p.p * 0.5; // Fade as they travel
+    ctx.globalAlpha = 1 - p.p * 0.5;
     ctx.font = "12px 'VT323', monospace";
     ctx.fillText(ch, x, y);
 
-    // Draw particle label (leaked string)
     if (p.label && p.p > 0.1 && p.p < 0.8) {
       ctx.globalAlpha = 0.6;
       ctx.font = "10px 'VT323', monospace";
@@ -207,7 +203,6 @@ function renderGraph() {
     const isHovered = node.hover || (hoveredNode && hoveredNode.id === node.id);
     const isSelected = selectedNode && selectedNode.id === node.id;
 
-    // Pulse effect
     const pulse = Math.sin(node.pulse_phase + state.tick * 0.05) * 0.3 + 0.7;
     const size = 14 + node.size * 2;
 
@@ -236,7 +231,6 @@ function renderGraph() {
     if (isHovered || isSelected) {
       ctx.shadowColor = node.color;
       ctx.shadowBlur = 20;
-      // Glowing border
       ctx.strokeStyle = node.color;
       ctx.lineWidth = 1;
       ctx.strokeRect(x - 20, y - 10, 40, 20);
@@ -258,6 +252,11 @@ function renderGraph() {
       ctx.font = "10px 'VT323', monospace";
       ctx.globalAlpha = 0.5;
       ctx.fillText(`[${node.protocol.toUpperCase()}]`, x, y - size / 2 - 6);
+    }
+
+    // Update tooltip position every frame for hovered node
+    if (isHovered && hoveredNode) {
+      updateTooltipPosition(node);
     }
 
     ctx.shadowBlur = 0;
@@ -307,7 +306,6 @@ function renderMatrixRain() {
   mctx.font = "14px 'VT323', monospace";
 
   for (let i = 0; i < matrixColumns.length; i++) {
-    // Use leaked data when available
     let ch;
     if (state.log.length > 0 && Math.random() < 0.3) {
       const logLine = state.log[Math.floor(Math.random() * state.log.length)];
@@ -346,8 +344,6 @@ function initAudio() {
     masterGain = audioCtx.createGain();
     masterGain.gain.value = 0.5;
     masterGain.connect(audioCtx.destination);
-
-    // Start ambient hum
     startAmbientHum();
     startHeartbeat();
   } catch (e) {
@@ -369,7 +365,6 @@ function startAmbientHum() {
   const gain = audioCtx.createGain();
   gain.gain.value = 0.015;
 
-  // LFO for pitch wobble
   ambientLfo = audioCtx.createOscillator();
   ambientLfo.frequency.value = 0.1;
   const lfoGain = audioCtx.createGain();
@@ -388,9 +383,6 @@ function startAmbientHum() {
 function startHeartbeat() {
   heartbeatInterval = setInterval(() => {
     if (!audioCtx || !soundEnabled) return;
-    const rate = (state.stats.total_leaks || 0);
-    // Heartbeat speed increases with leak rate
-    const interval = Math.max(400, 2000 - rate * 5);
     playHeartbeat();
   }, 1500);
 }
@@ -400,55 +392,44 @@ function playHeartbeat() {
   const osc = audioCtx.createOscillator();
   osc.type = "sine";
   osc.frequency.value = 40;
-
   const gain = audioCtx.createGain();
   const now = audioCtx.currentTime;
   gain.gain.setValueAtTime(0, now);
   gain.gain.linearRampToValueAtTime(0.08, now + 0.01);
   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-
   const filter = audioCtx.createBiquadFilter();
   filter.type = "lowpass";
   filter.frequency.value = 80;
   filter.Q.value = 5;
-
   osc.connect(filter);
   filter.connect(gain);
   gain.connect(masterGain);
-
   osc.start(now);
   osc.stop(now + 0.5);
 }
 
 function playSound(name, options = {}) {
   if (!audioCtx || !soundEnabled) return;
-
   const now = audioCtx.currentTime;
 
   if (name === "leak_blip") {
     const freqMap = { wifi: 440, ble: 587, zigbee: 659, thread: 523, matter: 698, zwave: 392 };
     const freq = freqMap[options.protocol] || 440;
-
     const osc = audioCtx.createOscillator();
     osc.type = "sine";
     osc.frequency.value = freq;
-
     const gain = audioCtx.createGain();
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(0.04, now + 0.005);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-
-    // Spatial panning based on random position
     const panner = audioCtx.createStereoPanner();
     panner.pan.value = (Math.random() - 0.5) * 1.5;
-
     osc.connect(gain);
     gain.connect(panner);
     panner.connect(masterGain);
     osc.start(now);
     osc.stop(now + 0.2);
   }
-
   else if (name === "click") {
     const osc = audioCtx.createOscillator();
     osc.type = "square";
@@ -461,7 +442,6 @@ function playSound(name, options = {}) {
     osc.start(now);
     osc.stop(now + 0.04);
   }
-
   else if (name === "correlation_lock") {
     const notes = [440, 554, 659, 880];
     notes.forEach((freq, i) => {
@@ -479,7 +459,6 @@ function playSound(name, options = {}) {
       osc.stop(t + 0.2);
     });
   }
-
   else if (name === "correlation_thunk") {
     const osc = audioCtx.createOscillator();
     osc.type = "sine";
@@ -492,8 +471,6 @@ function playSound(name, options = {}) {
     gain.connect(masterGain);
     osc.start(now);
     osc.stop(now + 0.7);
-
-    // Spark noise
     const bufferSize = audioCtx.sampleRate * 0.1;
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
@@ -512,7 +489,6 @@ function playSound(name, options = {}) {
     noise.start(now);
     noise.stop(now + 0.15);
   }
-
   else if (name === "glitch") {
     for (let i = 0; i < 6; i++) {
       const osc = audioCtx.createOscillator();
@@ -528,7 +504,6 @@ function playSound(name, options = {}) {
       osc.stop(t + 0.025);
     }
   }
-
   else if (name === "sub_bass") {
     const osc = audioCtx.createOscillator();
     osc.type = "sine";
@@ -542,7 +517,6 @@ function playSound(name, options = {}) {
     osc.start(now);
     osc.stop(now + 2);
   }
-
   else if (name === "konami") {
     const notes = [262, 330, 392, 523, 659, 784, 1047];
     notes.forEach((freq, i) => {
@@ -592,10 +566,8 @@ function updateLog() {
   const logEl = document.getElementById("log-content");
   const logs = state.log;
 
-  // Only update if new lines
   if (logEl.children.length === logs.length) return;
 
-  // Clear and re-render (simpler than diffing for typed animation)
   logEl.innerHTML = "";
   for (const line of logs) {
     const div = document.createElement("div");
@@ -625,25 +597,71 @@ function showNodeDetail(data) {
   const title = document.getElementById("detail-title");
 
   panel.classList.remove("hidden");
+  const protoColor = COLORS[data.node.protocol] || COLORS.unknown;
   title.textContent = `${data.node.label} [${data.node.protocol.toUpperCase()}]`;
 
-  let html = '<div class="detail-row"><div class="detail-key">ID</div><div class="detail-val">' + escapeHtml(data.node.id) + '</div></div>';
-  html += '<div class="detail-row"><div class="detail-key">Protocol</div><div class="detail-val" style="color:' + (COLORS[data.node.protocol] || COLORS.unknown) + '">' + data.node.protocol.toUpperCase() + '</div></div>';
-  html += '<div class="detail-row"><div class="detail-key">Type</div><div class="detail-val">' + data.node.type + '</div></div>';
-  html += '<div class="detail-row"><div class="detail-key">Confidence</div><div class="detail-val">' + (data.node.confidence * 100).toFixed(1) + '%</div></div>';
-  html += '<div class="detail-row"><div class="detail-key">Cluster</div><div class="detail-val">' + (data.node.cluster_id || 'None') + '</div></div>';
-  html += '<div class="detail-row"><div class="detail-key">Edges</div><div class="detail-val">' + data.edges.length + '</div></div>';
-  html += '<div class="detail-row"><div class="detail-key">Events</div><div class="detail-val">' + data.events.length + '</div></div>';
+  // Full address (strip dev_ / val_ prefix)
+  const addr = data.node.id.replace(/^(dev_|val_)/, "");
 
-  if (data.events.length > 0) {
-    html += '<br><div style="color:var(--green-dim)">─── Recent Events ───</div>';
-    for (const ev of data.events.slice(-5)) {
-      html += `<div class="log-line" style="color:${COLORS[ev.protocol] || COLORS.unknown}">[${ev.leak_type}] ${escapeHtml(ev.leak_value)}</div>`;
-    }
+  let html = `<div style="display:flex;gap:24px;flex-wrap:wrap">`;
+
+  // Left column: identity
+  html += `<div style="min-width:200px">`;
+  html += `<div style="color:var(--green-dim);margin-bottom:4px">─── Identity ───</div>`;
+  html += row("Address", addr);
+  html += row("Protocol", `<span style="color:${protoColor}">${data.node.protocol.toUpperCase()}</span>`);
+  html += row("Type", data.node.type);
+  if (data.vendor) html += row("Vendor", data.vendor);
+  if (data.node.cluster_id) {
+    html += row("Cluster", `<span style="color:var(--magenta)">${(data.node.confidence * 100).toFixed(0)}% confidence</span>`);
   }
+  if (data.rssi_min != null) {
+    html += row("RSSI", `${data.rssi_min} to ${data.rssi_max} dBm`);
+  }
+  if (data.first_seen) {
+    html += row("First seen", new Date(data.first_seen * 1000).toLocaleTimeString("en-US", { hour12: false }));
+  }
+  if (data.last_seen) {
+    html += row("Last seen", new Date(data.last_seen * 1000).toLocaleTimeString("en-US", { hour12: false }));
+  }
+  html += row("Events", `${data.events.length}`);
+  html += `</div>`;
+
+  // Middle column: leaked values
+  if (data.unique_leaks && data.unique_leaks.length > 0) {
+    html += `<div style="min-width:200px">`;
+    html += `<div style="color:var(--green-dim);margin-bottom:4px">─── Leaked Values ───</div>`;
+    for (const val of data.unique_leaks.slice(0, 10)) {
+      html += `<div style="color:${protoColor};font-size:12px">${escapeHtml(val)}</div>`;
+    }
+    if (data.unique_leaks.length > 10) {
+      html += `<div style="color:var(--green-dim);font-size:11px">+${data.unique_leaks.length - 10} more</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Right column: connected nodes
+  if (data.connected && data.connected.length > 0) {
+    html += `<div style="min-width:180px">`;
+    html += `<div style="color:var(--green-dim);margin-bottom:4px">─── Connected ───</div>`;
+    for (const c of data.connected.slice(0, 8)) {
+      const cc = COLORS[c.protocol] || COLORS.unknown;
+      html += `<div style="font-size:12px"><span style="color:${cc}">${NODE_CHARS[c.type] || "●"}</span> ${escapeHtml(c.label)} <span style="color:var(--green-dim)">${c.protocol}</span></div>`;
+    }
+    if (data.connected.length > 8) {
+      html += `<div style="color:var(--green-dim);font-size:11px">+${data.connected.length - 8} more</div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
 
   content.innerHTML = html;
   playSound("click");
+}
+
+function row(key, val) {
+  return `<div class="detail-row"><div class="detail-key">${key}</div><div class="detail-val">${val}</div></div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -654,6 +672,8 @@ let wizardData = {};
 
 function showWizard() {
   wizardStep = 0;
+  // Stop any existing capture on wizard reopen
+  fetch("/api/stop", { method: "POST" }).catch(() => {});
   document.getElementById("wizard-overlay").classList.remove("hidden");
   renderWizardStep();
 }
@@ -670,7 +690,6 @@ function renderWizardStep() {
   backBtn.classList.toggle("hidden", wizardStep === 0);
 
   if (wizardStep === 0) {
-    // Welcome + Legal
     content.innerHTML = `
       <div class="wizard-step">
         <div class="wizard-heading" style="animation: glitch-1 0.3s ease-out">
@@ -702,7 +721,6 @@ function renderWizardStep() {
     nextBtn.disabled = true;
 
   } else if (wizardStep === 1) {
-    // Hardware Detection
     content.innerHTML = `
       <div class="wizard-step">
         <div class="wizard-heading">HARDWARE DETECTION</div>
@@ -715,7 +733,6 @@ function renderWizardStep() {
     nextBtn.textContent = "NEXT ►";
     nextBtn.disabled = true;
 
-    // Run detection
     fetch("/api/wizard/detect", { method: "POST" })
       .then(r => r.json())
       .then(data => {
@@ -723,6 +740,23 @@ function renderWizardStep() {
         const el = document.getElementById("hw-results");
         if (!el) return;
         el.innerHTML = "";
+
+        // Cloud deployment — show friendly message and auto-advance
+        if (data.cloud) {
+          el.innerHTML = `
+            <div style="border:1px solid var(--yellow); padding:12px; margin:8px 0; text-align:center">
+              <div style="color:var(--yellow); font-size:16px; margin-bottom:8px">☁ CLOUD DEPLOYMENT DETECTED</div>
+              <div style="color:var(--green-dim)">Hardware capture is not available on cloud servers.<br>Demo mode will provide realistic simulated multi-protocol traffic.</div>
+            </div>
+          `;
+          nextBtn.disabled = false;
+          // Auto-skip past hardware + thread key steps after short delay
+          setTimeout(() => {
+            wizardStep = 3; // Jump to Initialize step
+            renderWizardStep();
+          }, 2500);
+          return;
+        }
 
         const items = [
           { label: "WiFi (Monitor Mode)", ok: data.wifi?.available, detail: data.wifi?.monitor_capable?.join(", ") || "None" },
@@ -752,7 +786,6 @@ function renderWizardStep() {
       });
 
   } else if (wizardStep === 2) {
-    // Thread Key
     content.innerHTML = `
       <div class="wizard-step">
         <div class="wizard-heading">THREAD NETWORK KEY (Optional)</div>
@@ -769,11 +802,10 @@ function renderWizardStep() {
         <div id="thread-key-status" style="margin-top:8px;font-size:12px"></div>
       </div>
     `;
-    nextBtn.textContent = "NEXT ►";
+    nextBtn.textContent = "SKIP / NEXT ►";
     nextBtn.disabled = false;
 
   } else if (wizardStep === 3) {
-    // Initialize
     content.innerHTML = `
       <div class="wizard-step">
         <div class="wizard-heading">INITIALIZE PROTOCOLS</div>
@@ -790,7 +822,6 @@ function renderWizardStep() {
     nextBtn.disabled = true;
 
   } else if (wizardStep === 4) {
-    // Summary
     content.innerHTML = `
       <div class="wizard-step">
         <div class="wizard-heading">READY TO CAPTURE</div>
@@ -839,7 +870,6 @@ window.initializeProtocols = function() {
   if (btn) btn.disabled = true;
   if (status) status.innerHTML = '<span style="color:var(--yellow)">Initializing...</span>';
 
-  // Send thread key if provided
   const keyInput = document.getElementById("thread-key-input");
   const threadKey = keyInput ? keyInput.value.trim() : "";
   if (threadKey) {
@@ -879,7 +909,6 @@ window.initializeProtocols = function() {
 document.getElementById("wizard-next").addEventListener("click", () => {
   playSound("click");
   if (wizardStep === 4) {
-    // Begin capturing
     hideWizard();
     fetch("/api/wizard/start", { method: "POST" }).then(() => {
       state.capturing = true;
@@ -906,6 +935,10 @@ document.getElementById("btn-wizard").addEventListener("click", () => {
 
 document.getElementById("detail-close").addEventListener("click", () => {
   document.getElementById("detail-panel").classList.add("hidden");
+  // Unpin selected node
+  if (selectedNode) {
+    sendWS({ cmd: "unpin_node", node_id: selectedNode.id });
+  }
   selectedNode = null;
   focusMode = false;
   document.body.classList.remove("focus-mode");
@@ -925,9 +958,9 @@ graphCanvas.addEventListener("mousemove", (e) => {
   const scaleX = graphCanvas.width / 160;
   const scaleY = graphCanvas.height / 50;
 
-  // Find nearest node
+  // Find nearest node — generous 45px hit radius
   let nearest = null;
-  let minDist = 20; // pixels
+  let minDist = 45;
   for (const node of state.nodes) {
     const nx = node.x * scaleX;
     const ny = node.y * scaleY;
@@ -951,7 +984,7 @@ graphCanvas.addEventListener("mousemove", (e) => {
 });
 
 graphCanvas.addEventListener("click", (e) => {
-  initAudio(); // Unlock audio on first click
+  initAudio();
 
   if (hoveredNode) {
     if (creatorMode) {
@@ -960,7 +993,6 @@ graphCanvas.addEventListener("click", (e) => {
         document.getElementById("bottom-status").textContent = `Creator: Selected ${hoveredNode.label} — click second node to link`;
         playSound("click");
       } else {
-        // Force correlate
         sendWS({ cmd: "force_correlate", a: creatorFirst, b: hoveredNode.id });
         playSound("correlation_lock");
         document.getElementById("bottom-status").textContent = `Creator: Linked ${creatorFirst} ↔ ${hoveredNode.id}`;
@@ -969,12 +1001,22 @@ graphCanvas.addEventListener("click", (e) => {
       return;
     }
 
+    // Unpin previously selected node
+    if (selectedNode && selectedNode.id !== hoveredNode.id) {
+      sendWS({ cmd: "unpin_node", node_id: selectedNode.id });
+    }
+
     selectedNode = hoveredNode;
     sendWS({ cmd: "select_node", node_id: hoveredNode.id });
+    sendWS({ cmd: "pin_node", node_id: hoveredNode.id });
     focusMode = true;
     document.body.classList.add("focus-mode");
     playSound("click");
   } else {
+    // Unpin and deselect
+    if (selectedNode) {
+      sendWS({ cmd: "unpin_node", node_id: selectedNode.id });
+    }
     selectedNode = null;
     focusMode = false;
     document.body.classList.remove("focus-mode");
@@ -984,22 +1026,41 @@ graphCanvas.addEventListener("click", (e) => {
 
 graphCanvas.addEventListener("mouseleave", () => {
   hoveredNode = null;
+  sendWS({ cmd: "unhover" });
   hideTooltip();
 });
 
 function showTooltip(node) {
   const tooltip = document.getElementById("node-tooltip");
-  const scaleX = graphCanvas.width / 160;
-  const scaleY = graphCanvas.height / 50;
-  tooltip.style.left = (node.x * scaleX + 15) + "px";
-  tooltip.style.top = (node.y * scaleY - 10) + "px";
+  updateTooltipPosition(node);
   tooltip.style.borderColor = node.color;
+
+  const ageStr = node.age < 60 ? `${Math.floor(node.age)}s ago` : `${Math.floor(node.age / 60)}m ago`;
+  const edgeCount = state.edges.filter(e => e.source === node.id || e.target === node.id).length;
+
   tooltip.innerHTML = `
     <div style="color:${node.color};font-size:14px">${NODE_CHARS[node.type] || "●"} ${escapeHtml(node.label)}</div>
-    <div style="color:var(--green-dim);font-size:11px">${node.protocol.toUpperCase()} ${node.type}</div>
+    <div style="color:var(--green-dim);font-size:11px">${node.protocol.toUpperCase()} ${node.type} · ${edgeCount} links</div>
+    <div style="color:var(--green-dim);font-size:11px">Last seen: ${ageStr}</div>
     ${node.cluster_id ? `<div style="color:var(--magenta);font-size:11px">Cluster: ${node.confidence ? (node.confidence * 100).toFixed(0) + "%" : "?"}</div>` : ""}
+    <div style="color:var(--green-dim);font-size:10px;margin-top:2px">Click for details</div>
   `;
   tooltip.classList.remove("hidden");
+}
+
+function updateTooltipPosition(node) {
+  const tooltip = document.getElementById("node-tooltip");
+  if (tooltip.classList.contains("hidden")) return;
+  const scaleX = graphCanvas.width / 160;
+  const scaleY = graphCanvas.height / 50;
+  let left = node.x * scaleX + 15;
+  let top = node.y * scaleY - 10;
+  // Keep tooltip within graph panel bounds
+  if (left + 250 > graphCanvas.width) left = node.x * scaleX - 260;
+  if (top + 80 > graphCanvas.height) top = graphCanvas.height - 85;
+  if (top < 0) top = 5;
+  tooltip.style.left = left + "px";
+  tooltip.style.top = top + "px";
 }
 
 function hideTooltip() {
@@ -1023,18 +1084,13 @@ document.getElementById("btn-sound").addEventListener("click", () => {
 // ═══════════════════════════════════════════════════════════════
 // KEYBOARD SHORTCUTS & EASTER EGGS
 // ═══════════════════════════════════════════════════════════════
-
-// Konami code detector
-const konamiSequence = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65]; // ↑↑↓↓←→←→BA
+const konamiSequence = [38, 38, 40, 40, 37, 39, 37, 39, 66, 65];
 let konamiIndex = 0;
-
-// fsociety text buffer
 let textBuffer = "";
 
 document.addEventListener("keydown", (e) => {
   initAudio();
 
-  // Konami code
   if (e.keyCode === konamiSequence[konamiIndex]) {
     konamiIndex++;
     if (konamiIndex === konamiSequence.length) {
@@ -1045,16 +1101,13 @@ document.addEventListener("keydown", (e) => {
     konamiIndex = 0;
   }
 
-  // Text easter eggs
   textBuffer += e.key.toLowerCase();
   if (textBuffer.length > 20) textBuffer = textBuffer.slice(-20);
-
   if (textBuffer.endsWith("fsociety")) {
     triggerFsociety();
     textBuffer = "";
   }
 
-  // Creator Mode: Ctrl+Shift+C
   if (e.ctrlKey && e.shiftKey && e.key === "C") {
     e.preventDefault();
     creatorMode = !creatorMode;
@@ -1066,8 +1119,10 @@ document.addEventListener("keydown", (e) => {
     playSound(creatorMode ? "correlation_lock" : "click");
   }
 
-  // Escape — exit focus/detail
   if (e.key === "Escape") {
+    if (selectedNode) {
+      sendWS({ cmd: "unpin_node", node_id: selectedNode.id });
+    }
     selectedNode = null;
     focusMode = false;
     document.body.classList.remove("focus-mode");
@@ -1098,7 +1153,6 @@ function triggerFsociety() {
   overlay.style.color = "#ff0000";
   overlay.innerHTML = "THEY OWN YOU<br><span style='font-size:24px;color:#ff000088'>control is an illusion</span>";
   overlay.style.animation = "glitch-1 0.3s ease-out 3";
-
   setTimeout(() => {
     overlay.classList.add("hidden");
     overlay.style.animation = "";
@@ -1107,7 +1161,6 @@ function triggerFsociety() {
 }
 
 function checkEasterEggs() {
-  // 666 leaks
   if (totalLeaksEver === 666) {
     playSound("sub_bass");
     const overlay = document.getElementById("easter-overlay");

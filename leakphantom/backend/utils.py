@@ -194,7 +194,7 @@ class LeakStore:
         if val_id not in self.nodes:
             self.nodes[val_id] = GraphNode(
                 id=val_id,
-                label=event.leak_value[:20],
+                label=event.leak_value[:30],
                 protocol=event.protocol,
                 node_type="ssid" if event.leak_type == "ssid_probe" else "service",
                 color=PROTOCOL_COLORS.get(event.protocol, "#00ff41"),
@@ -233,6 +233,15 @@ class LeakStore:
             "proto_zwave": self._stats.get("proto_zwave", 0),
         }
 
+    def clear(self):
+        """Reset all data for a clean restart."""
+        self.events.clear()
+        self.nodes.clear()
+        self.edges.clear()
+        self.log_lines.clear()
+        self._stats = defaultdict(int)
+        self._start_time = time.time()
+
     def get_node_detail(self, node_id: str) -> Optional[dict]:
         node = self.nodes.get(node_id)
         if not node:
@@ -243,11 +252,46 @@ class LeakStore:
         related_events = [asdict(ev) for ev in self.events
                           if f"dev_{ev.source_addr}" == node_id
                           or f"val_{hashlib.md5(ev.leak_value.encode()).hexdigest()[:10]}" == node_id][-20:]
+
+        # Vendor lookup for device nodes
+        vendor = ""
+        if node_id.startswith("dev_"):
+            vendor = lookup_vendor(node_id[4:])
+
+        # Connected node labels
+        connected = self._get_connected_labels(node_id)
+
+        # Compute RSSI range and unique leaked values from events
+        rssi_values = [ev["rssi"] for ev in related_events if ev.get("rssi", -100) != -100]
+        unique_leaks = list({ev["leak_value"] for ev in related_events if ev.get("leak_value")})
+        timestamps = [ev["timestamp"] for ev in related_events if ev.get("timestamp")]
+
         return {
             "node": node.to_dict(),
             "edges": related_edges,
             "events": related_events,
+            "vendor": vendor,
+            "connected": connected,
+            "rssi_min": min(rssi_values) if rssi_values else None,
+            "rssi_max": max(rssi_values) if rssi_values else None,
+            "unique_leaks": unique_leaks[:20],
+            "first_seen": min(timestamps) if timestamps else None,
+            "last_seen": max(timestamps) if timestamps else None,
         }
+
+    def _get_connected_labels(self, node_id: str) -> list[dict]:
+        """Get labels and protocols of all nodes connected to this one."""
+        result = []
+        for e in self.edges.values():
+            other_id = None
+            if e.source == node_id:
+                other_id = e.target
+            elif e.target == node_id:
+                other_id = e.source
+            if other_id and other_id in self.nodes:
+                n = self.nodes[other_id]
+                result.append({"id": other_id, "label": n.label, "protocol": n.protocol, "type": n.node_type})
+        return result
 
     def export_all(self) -> dict:
         return {

@@ -94,7 +94,7 @@ class Orchestrator:
     # ------------------------------------------------------------------
     async def start(self):
         if self.is_running:
-            return
+            await self.stop()
         self.is_running = True
         logger.info("[ORCH] Starting capture ...")
 

@@ -16,17 +16,24 @@ from correlation_engine import CorrelationEngine
 class ASCIIGraphEngine:
     """Server-side force-directed layout with particle system."""
 
-    # Layout constants
+    # Layout constants — tuned for stability
     GRID_W = 160           # Character grid width
     GRID_H = 50            # Character grid height
-    REPULSION = 500.0      # Coulomb repulsion constant
+    REPULSION = 150.0      # Coulomb repulsion (lower = calmer)
     ATTRACTION = 0.01      # Hooke spring constant
-    DAMPING = 0.85         # Velocity damping
+    DAMPING = 0.93         # Velocity damping (higher = settles faster)
     SNAP_GRID = 2          # Snap positions to 2-char grid
-    MAX_VELOCITY = 5.0     # Max velocity per tick
+    MAX_VELOCITY = 2.0     # Max velocity per tick
     IDEAL_EDGE_LEN = 12.0  # Ideal edge length in grid units
     CENTER_GRAVITY = 0.02  # Pull toward center
     CLUSTER_ATTRACTION = 0.005  # Extra pull for cluster members
+
+    # Temperature / cooling
+    COOLING_START_TICKS = 600   # ~30s at 20fps before cooling begins
+    COOLING_RATE = 0.995        # Multiplicative decay per tick
+    MIN_TEMPERATURE = 0.01      # Floor
+    REHEAT_AMOUNT = 0.3         # Bump on new node arrival
+    NEW_NODE_WARM_TICKS = 100   # New nodes stay warm for ~5s
 
     # Particle system
     MAX_PARTICLES = 80
@@ -37,12 +44,31 @@ class ASCIIGraphEngine:
         self.store = correlation_engine.store
         self.particles: list[Particle] = []
         self._hover_id: Optional[str] = None
+        self._hover_pinned_id: Optional[str] = None  # Track hover-pinned node
         self._tick = 0
-        self._snap_animations: dict[str, dict] = {}  # node_id → {target_x, target_y, progress}
-        self._flash_edges: dict[str, float] = {}  # edge_id → flash_start_time
+        self._snap_animations: dict[str, dict] = {}
+        self._flash_edges: dict[str, float] = {}
+
+        # Temperature system
+        self._temperature = 1.0
+        self._last_node_count = 0
+        self._ticks_since_new_node = 0
+        self._node_birth_ticks: dict[str, int] = {}  # node_id → birth tick
 
     def set_hover(self, node_id: Optional[str]):
+        """Pin hovered node, unpin previous."""
+        # Unpin previously hover-pinned node
+        if self._hover_pinned_id and self._hover_pinned_id in self.store.nodes:
+            node = self.store.nodes[self._hover_pinned_id]
+            # Only unpin if it was hover-pinned (not user-pinned)
+            if not getattr(node, '_user_pinned', False):
+                node.pinned = False
+        self._hover_pinned_id = None
+
         self._hover_id = node_id
+        if node_id and node_id in self.store.nodes:
+            self.store.nodes[node_id].pinned = True
+            self._hover_pinned_id = node_id
 
     def step(self):
         """One physics tick — call at ~20fps."""
@@ -57,26 +83,40 @@ class ASCIIGraphEngine:
         if not nodes:
             return
 
+        # --- Temperature management ---
+        current_count = len(nodes)
+        if current_count > self._last_node_count:
+            # New nodes arrived — reheat
+            self._ticks_since_new_node = 0
+            self._temperature = min(self._temperature + self.REHEAT_AMOUNT, 1.0)
+        else:
+            self._ticks_since_new_node += 1
+        self._last_node_count = current_count
+
+        # Cool down after idle period
+        if self._ticks_since_new_node > self.COOLING_START_TICKS:
+            self._temperature = max(self.MIN_TEMPERATURE, self._temperature * self.COOLING_RATE)
+
         # Initialize new node positions randomly
         for nid, node in nodes.items():
             if node.x == 0 and node.y == 0:
                 node.x = random.uniform(10, self.GRID_W - 10)
                 node.y = random.uniform(5, self.GRID_H - 5)
-                node.vx = random.uniform(-1, 1)
-                node.vy = random.uniform(-1, 1)
+                node.vx = random.uniform(-0.5, 0.5)
+                node.vy = random.uniform(-0.5, 0.5)
+                self._node_birth_ticks[nid] = self._tick
 
         # --- Fruchterman-Reingold forces ---
         forces: dict[str, tuple[float, float]] = {nid: (0.0, 0.0) for nid in nodes}
         node_list = list(nodes.items())
 
-        # Repulsion (all pairs)
+        # Repulsion (all pairs) — scaled by global temperature
         for i, (id_a, na) in enumerate(node_list):
             for id_b, nb in node_list[i + 1:]:
                 dx = na.x - nb.x
                 dy = na.y - nb.y
                 dist = math.sqrt(dx * dx + dy * dy) + 0.01
-                # Coulomb repulsion
-                force = self.REPULSION / (dist * dist)
+                force = (self.REPULSION * self._temperature) / (dist * dist)
                 fx = (dx / dist) * force
                 fy = (dy / dist) * force
                 forces[id_a] = (forces[id_a][0] + fx, forces[id_a][1] + fy)
@@ -91,10 +131,8 @@ class ASCIIGraphEngine:
             dx = na.x - nb.x
             dy = na.y - nb.y
             dist = math.sqrt(dx * dx + dy * dy) + 0.01
-            # Hooke's law with ideal length
             displacement = dist - self.IDEAL_EDGE_LEN
             force = self.ATTRACTION * displacement
-            # Stronger attraction for correlation edges
             if edge.edge_type == "correlation":
                 force *= 3.0
             fx = (dx / dist) * force
@@ -107,7 +145,6 @@ class ASCIIGraphEngine:
         for root, members in clusters.items():
             if len(members) < 2:
                 continue
-            # Compute centroid
             cx = sum(nodes[m].x for m in members if m in nodes) / len(members)
             cy = sum(nodes[m].y for m in members if m in nodes) / len(members)
             for m in members:
@@ -132,9 +169,12 @@ class ASCIIGraphEngine:
         # Apply forces
         for nid, node in nodes.items():
             if node.pinned:
+                # Pinned nodes: zero velocity, stay put
+                node.vx = 0
+                node.vy = 0
                 continue
+
             if nid in self._snap_animations:
-                # Node is in snap animation — interpolate toward target
                 anim = self._snap_animations[nid]
                 anim["progress"] = min(anim["progress"] + 0.05, 1.0)
                 t = _ease_out_cubic(anim["progress"])
@@ -144,9 +184,16 @@ class ASCIIGraphEngine:
                     del self._snap_animations[nid]
                 continue
 
+            # Per-node temperature: new nodes stay warm even when global temp is cold
+            node_temp = self._temperature
+            birth = self._node_birth_ticks.get(nid, 0)
+            node_age = self._tick - birth
+            if node_age < self.NEW_NODE_WARM_TICKS:
+                node_temp = max(node_temp, 0.5 * (1.0 - node_age / self.NEW_NODE_WARM_TICKS))
+
             fx, fy = forces.get(nid, (0, 0))
-            node.vx = (node.vx + fx) * self.DAMPING
-            node.vy = (node.vy + fy) * self.DAMPING
+            node.vx = (node.vx + fx * node_temp) * self.DAMPING
+            node.vy = (node.vy + fy * node_temp) * self.DAMPING
 
             # Clamp velocity
             speed = math.sqrt(node.vx ** 2 + node.vy ** 2)
@@ -161,17 +208,17 @@ class ASCIIGraphEngine:
             node.x = max(2, min(node.x, self.GRID_W - 2))
             node.y = max(2, min(node.y, self.GRID_H - 2))
 
-            # Grid snapping (soft — every few ticks)
-            if self._tick % 5 == 0:
-                node.x = round(node.x / self.SNAP_GRID) * self.SNAP_GRID
-                node.y = round(node.y / self.SNAP_GRID) * self.SNAP_GRID
+            # Soft snap-to-grid: only when cool, and interpolate
+            if self._tick % 40 == 0 and self._temperature < 0.3:
+                target_x = round(node.x / self.SNAP_GRID) * self.SNAP_GRID
+                target_y = round(node.y / self.SNAP_GRID) * self.SNAP_GRID
+                node.x += (target_x - node.x) * 0.1
+                node.y += (target_y - node.y) * 0.1
 
         # --- Update confidence pulses ---
         for nid, node in nodes.items():
             age = time.time() - node.last_seen
-            # Pulse intensity: brighter when recent
             pulse = max(0.2, 1.0 - age / 30.0)
-            # Overlay cluster confidence
             if node.cluster_id:
                 pulse = min(pulse + node.confidence * 0.3, 1.0)
             node.size = max(1, min(int(pulse * 5) + 1, 8))
@@ -190,18 +237,14 @@ class ASCIIGraphEngine:
         edges = self.store.edges
         nodes = self.store.nodes
 
-        # Advance existing particles
         alive = []
         for p in self.particles:
             p.progress += p.speed
             if p.progress < 1.0:
                 alive.append(p)
-            # else: particle reached destination (absorbed)
         self.particles = alive
 
-        # Spawn new particles on active edges
         if len(self.particles) < self.MAX_PARTICLES and edges:
-            # Weighted toward recent edges
             edge_list = list(edges.values())
             for _ in range(min(3, self.MAX_PARTICLES - len(self.particles))):
                 edge = random.choice(edge_list)
@@ -210,7 +253,6 @@ class ASCIIGraphEngine:
                 if not src or not tgt:
                     continue
 
-                # Use leaked values as particle labels
                 recent_events = [
                     e for e in list(self.store.events)[-50:]
                     if f"dev_{e.source_addr}" == edge.source
@@ -230,15 +272,9 @@ class ASCIIGraphEngine:
                 self.particles.append(p)
 
     def trigger_snap_animation(self, node_id: str, target_x: float, target_y: float):
-        """Trigger a 600ms snap animation for a node (e.g., on new correlation)."""
-        self._snap_animations[node_id] = {
-            "tx": target_x,
-            "ty": target_y,
-            "progress": 0.0,
-        }
+        self._snap_animations[node_id] = {"tx": target_x, "ty": target_y, "progress": 0.0}
 
     def trigger_edge_flash(self, edge_id: str):
-        """Trigger a white flash on a new edge."""
         self._flash_edges[edge_id] = time.time()
 
     # ------------------------------------------------------------------
@@ -274,7 +310,6 @@ class ASCIIGraphEngine:
             tgt = nodes.get(p.edge_target)
             if not src or not tgt:
                 continue
-            # Interpolate position along edge
             x = src.x + (tgt.x - src.x) * p.progress
             y = src.y + (tgt.y - src.y) * p.progress
             d = p.to_dict()

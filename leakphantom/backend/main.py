@@ -194,6 +194,22 @@ async def wizard_initialize(body: dict = None):
 @app.post("/api/wizard/start")
 async def wizard_start():
     if orchestrator:
+        await orchestrator.stop()
+        if leak_store:
+            leak_store.clear()
+        if correlation_engine:
+            correlation_engine._last_process_idx = 0
+            correlation_engine._correlation_edges.clear()
+            correlation_engine.uf = __import__('correlation_engine').UnionFind()
+            correlation_engine._device_leak_sets.clear()
+            correlation_engine._device_timestamps.clear()
+            correlation_engine._device_rssi.clear()
+        if graph_engine:
+            graph_engine.particles.clear()
+            graph_engine._temperature = 1.0
+            graph_engine._last_node_count = 0
+            graph_engine._ticks_since_new_node = 0
+            graph_engine._node_birth_ticks.clear()
         await orchestrator.start()
         return {"status": "capturing"}
     return {"error": "Orchestrator not initialized"}
@@ -280,6 +296,18 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
     elif cmd == "force_correlate":
         if correlation_engine:
             correlation_engine.force_link(msg.get("a"), msg.get("b"))
+
+    elif cmd == "pin_node":
+        node_id = msg.get("node_id")
+        if leak_store and node_id in leak_store.nodes:
+            leak_store.nodes[node_id].pinned = True
+            setattr(leak_store.nodes[node_id], '_user_pinned', True)
+
+    elif cmd == "unpin_node":
+        node_id = msg.get("node_id")
+        if leak_store and node_id in leak_store.nodes:
+            leak_store.nodes[node_id].pinned = False
+            setattr(leak_store.nodes[node_id], '_user_pinned', False)
 
     elif cmd == "ping":
         await ws.send_text(json.dumps({"type": "pong", "t": time.time()}))
