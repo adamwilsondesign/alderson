@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LEAKPHANTOM v2.3.1</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👻</text></svg>" />
+</head>
+<body>
+  <!-- CRT Overlay -->
+  <div id="crt-overlay"></div>
+  <div id="scanline"></div>
+
+  <!-- Matrix Rain Canvas (background) -->
+  <canvas id="matrix-rain"></canvas>
+
+  <!-- Main Terminal -->
+  <div id="terminal">
+
+    <!-- Top Bar -->
+    <div id="top-bar">
+      <div id="top-left">
+        <span class="logo-text">LEAKPHANTOM</span>
+        <span class="version">v2.3.1</span>
+        <span id="mode-badge" class="badge badge-demo">DEMO</span>
+      </div>
+      <div id="top-center">
+        <span id="status-text">INITIALIZING</span>
+      </div>
+      <div id="top-right">
+        <span id="clock"></span>
+        <span id="fps-counter">0 fps</span>
+        <button id="btn-sound" class="top-btn" title="Toggle Sound">♪</button>
+        <button id="btn-wizard" class="top-btn" title="Setup Wizard">⚙</button>
+      </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div id="stats-bar">
+      <div class="stat" id="stat-leaks"><span class="stat-label">LEAKS</span><span class="stat-value" id="val-leaks">0</span></div>
+      <div class="stat" id="stat-devices"><span class="stat-label">DEVICES</span><span class="stat-value" id="val-devices">0</span></div>
+      <div class="stat" id="stat-clusters"><span class="stat-label">CLUSTERS</span><span class="stat-value" id="val-clusters">0</span></div>
+      <div class="stat" id="stat-corr"><span class="stat-label">CORRELATIONS</span><span class="stat-value" id="val-corr">0</span></div>
+      <div class="stat-separator">│</div>
+      <div class="stat proto-wifi"><span class="stat-label">WiFi</span><span class="stat-value" id="val-wifi">0</span></div>
+      <div class="stat proto-ble"><span class="stat-label">BLE</span><span class="stat-value" id="val-ble">0</span></div>
+      <div class="stat proto-zigbee"><span class="stat-label">Zigbee</span><span class="stat-value" id="val-zigbee">0</span></div>
+      <div class="stat proto-thread"><span class="stat-label">Thread</span><span class="stat-value" id="val-thread">0</span></div>
+      <div class="stat proto-matter"><span class="stat-label">Matter</span><span class="stat-value" id="val-matter">0</span></div>
+      <div class="stat proto-zwave"><span class="stat-label">Z-Wave</span><span class="stat-value" id="val-zwave">0</span></div>
+      <div class="stat-separator">│</div>
+      <div class="stat"><span class="stat-label">UPTIME</span><span class="stat-value" id="val-uptime">0s</span></div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="main-area">
+      <!-- Graph Canvas (ASCII force-directed) -->
+      <div id="graph-panel">
+        <canvas id="graph-canvas"></canvas>
+        <div id="node-tooltip" class="hidden"></div>
+      </div>
+
+      <!-- Log Panel (right side) -->
+      <div id="log-panel">
+        <div id="log-header">─── INTERCEPT LOG ───</div>
+        <div id="log-content"></div>
+      </div>
+    </div>
+
+    <!-- Detail Panel (bottom, expandable) -->
+    <div id="detail-panel" class="hidden">
+      <div id="detail-header">
+        <span id="detail-title">NODE DETAILS</span>
+        <button id="detail-close" class="top-btn">✕</button>
+      </div>
+      <div id="detail-content"></div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div id="bottom-bar">
+      <span id="bottom-status">Ready</span>
+      <span id="bottom-hint">Hover nodes for details • Click to inspect • Ctrl+Shift+C: Creator Mode</span>
+    </div>
+  </div>
+
+  <!-- Setup Wizard Overlay -->
+  <div id="wizard-overlay" class="hidden">
+    <div id="wizard-window">
+      <div id="wizard-border">
+        <div id="wizard-title-bar">
+          <span>╔══ LEAKPHANTOM SETUP WIZARD ══╗</span>
+        </div>
+        <div id="wizard-content">
+          <!-- Steps injected by JS -->
+        </div>
+        <div id="wizard-footer">
+          <button id="wizard-back" class="wizard-btn hidden">◄ BACK</button>
+          <button id="wizard-next" class="wizard-btn">NEXT ►</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Easter egg overlays -->
+  <div id="easter-overlay" class="hidden"></div>
+
+  <script src="/assets/script.js"></script>
+</body>
+</html>
