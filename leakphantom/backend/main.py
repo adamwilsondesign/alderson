@@ -299,8 +299,8 @@ def main():
                                          v2.3.1 — PHANTOM PROTOCOL
     """)
 
-    host = os.getenv("LEAKPHANTOM_HOST", "127.0.0.1")
-    port = int(os.getenv("LEAKPHANTOM_PORT", "8666"))
+    host = os.getenv("LEAKPHANTOM_HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", os.getenv("LEAKPHANTOM_PORT", "8666")))
 
     uvicorn.run(
         "main:app",

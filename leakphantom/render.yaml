@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: leakphantom
+    runtime: python
+    rootDir: leakphantom
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd backend && python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      - key: LEAKPHANTOM_HOST
+        value: "0.0.0.0"
